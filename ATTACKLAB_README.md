@@ -19,7 +19,7 @@ In phase 1, we need to modify return address of `getbuf` to function `touch1`.
 
 The stack layout when calling `getbuf` (after executing `sub rsp,0x28`)is shown as below:
 
-![phase1-1](.\img\attack_lab\csapp_attack_phase_1_1.png)
+![phase1-1](https://raw.githubusercontent.com/ChenyuZhuWhiskey/Csapp-Lab/master/img/attack_lab/csapp_attack_phase_1_1.png)
 
 The function `Gets` would copy every byte from input to buffer from start lower address to higher address, when constructing input string with length 48 and the last 8 byes as return address of `touch1`(little endian in my machine), after the executions of :
 
@@ -196,11 +196,11 @@ We can see `hexmatch` use function `sprintf()` convert cookie value (stored in `
 
 In the calling of `hexmatch`, the stack layout is shown below:
 
-![phase3-1](.\img\attack_lab\csapp_attack_phase_3_1.png)
+![phase3-1]( https://raw.githubusercontent.com/ChenyuZhuWhiskey/Csapp-Lab/master/img/attack_lab/csapp_attack_phase_3_1.png )
 
 In this case, we could not save cookie string in first 40 bytes of attack string, because they are in the stack of `hexmatch` and could be write up during the execution of `hexmatch`. So we need to design stack layout like this:
 
-![phase3-2](.\img\attack_lab\csapp_attack_phase_3_2.png)
+![phase3-2]( https://raw.githubusercontent.com/ChenyuZhuWhiskey/Csapp-Lab/master/img/attack_lab/csapp_attack_phase_3_2.png )
 
 The injection code is shown below:
 
