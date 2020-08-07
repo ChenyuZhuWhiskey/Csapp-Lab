@@ -1,0 +1,37 @@
+#   Execution begins at address 0
+        .pos 0
+        irmovq stack, %rsp          #initial stack ptr
+        call main                   #invoke main
+        halt                        #end program
+#   Sample linked list
+        .align 8
+    ele1:
+        .quad 0x00a                 #quad = quard word
+        .quad ele2
+    ele2:
+        .quad 0x0b0
+        .quad ele3
+    ele3:
+        .quad 0xc00
+        .quad 0
+main:
+    xorq %rax, %rax
+    irmoveq ele1,%rdi               #pass arg1
+    call rsum_list
+    ret
+
+rsum_list:
+        pushq   %rcx
+	pushq	%rbx            
+        andq    %rdi,%rdi       
+        je      end
+        mrmoveq (%rdi),%rcx     # ls->val
+        irmoveq $8,%rbx         
+        addq    %rbx,%rdi       # ls->next
+        mrmoveq (%rdi),%rdi     # ls = ls->next
+        call    rsumlist
+        addq    %rcx,%rax       # return val+rest
+end:
+        popq    %rbx
+	popq	%rcx
+        ret

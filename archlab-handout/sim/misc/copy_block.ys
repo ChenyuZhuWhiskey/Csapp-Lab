@@ -1,0 +1,43 @@
+#   Execution begins at address 0
+        .pos 0
+        irmovq stack, %rsp          #initial stack ptr
+        call main                   #invoke main
+        halt                        #end program
+#   Sample linked list
+        .align 8
+    ele1:
+        .quad 0x00a                 #quad = quard word
+        .quad ele2
+    ele2:
+        .quad 0x0b0
+        .quad ele3
+    ele3:
+        .quad 0xc00
+        .quad 0
+main:
+    irmoveq src,%rdi               #pass arg1
+    irmoveq dest,%rsi		   #pass arg2
+    call copy_block
+    ret
+
+copy_block:
+    pushq %rbx
+    pushq %rcx
+    xorq %rax, %rax		#long val=0
+loop:
+    addq %rdx, %rdx
+    jle  end 			#if len > 0 then loop
+    mrmoveq (%rdi),%rcx         #long val = *src
+    irmoveq $8,rbx
+    addq %rbx,%rdi		#src++
+    rmmoveq %rcx,(%rsi) 	#*dest = val
+    addq %rbx,%rsi		#dest++
+    xorq %rcx, %rax		#result ^= val
+    irmoveq $1, %rbx
+    subq %rbx,%rdx		#len--
+    jmp loop
+
+end：
+    popq %rcx
+    popq %rbx
+    ret
