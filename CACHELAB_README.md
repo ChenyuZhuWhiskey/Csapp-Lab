@@ -1,3 +1,9 @@
+# Cache Lab
+## Part 1
+In part 1 we need to simulate how cache works. The whole process can be described down below:
+![description](./img/cache_lab/Write-back_with_write-allocation..png)
+Solution to this problem is down below:
+```c
 #include "cachelab.h"
 #include <getopt.h>
 #include <stdio.h>
@@ -241,3 +247,65 @@ void Load(int count, unsigned int setindex, unsigned int tag,
 
   return;
 }
+```
+
+## Part 2
+In part 2 we need to optimize the performance of matrix transposition. We can improve it by incresasing temporal and spatial locality, makeing full use of mechanism of cache, i.e. using blocking method:
+```c
+void transpose_submit(int M, int N, int A[N][M], int B[M][N]) {
+  int i, j, ii, jj, a1, a2, a3, a4, a5, a6, a7, a0;
+  if (M == 32) {
+
+    for (i = 0; i < N; i += 8) {
+      for (j = 0; j < M; j += 8) {
+        for (ii = i; ii < i + 8; ii++) {
+          jj = j;
+          a0 = A[ii][jj];
+          a1 = A[ii][jj + 1];
+          a2 = A[ii][jj + 2];
+          a3 = A[ii][jj + 3];
+          a4 = A[ii][jj + 4];
+          a5 = A[ii][jj + 5];
+          a6 = A[ii][jj + 6];
+          a7 = A[ii][jj + 7];
+          B[jj][ii] = a0;
+          B[jj + 1][ii] = a1;
+          B[jj + 2][ii] = a2;
+          B[jj + 3][ii] = a3;
+          B[jj + 4][ii] = a4;
+          B[jj + 5][ii] = a5;
+          B[jj + 6][ii] = a6;
+          B[jj + 7][ii] = a7;
+        }
+      }
+    }
+  } else if (M == 64) {
+    for (i = 0; i < N; i += 4) {
+      for (j = 0; j < M; j += 4) {
+        for (ii = i; ii < i + 4; ii++) {
+          jj = j;
+          a0 = A[ii][jj];
+          a1 = A[ii][jj + 1];
+          a2 = A[ii][jj + 2];
+          a3 = A[ii][jj + 3];
+          B[jj][ii] = a0;
+          B[jj + 1][ii] = a1;
+          B[jj + 2][ii] = a2;
+          B[jj + 3][ii] = a3;
+        }
+      }
+    }
+  } else {
+    for (i = 0; i < N; i += 16) {
+      for (j = 0; j < M; j += 16) {
+        for (ii = i; ii < i + 16 && ii < N; ii++) {
+          for (jj = j; jj < j + 16 && jj < M; jj++) {
+            a0 = A[ii][jj];
+            B[jj][ii] = a0;
+          }
+        }
+      }
+    }
+  }
+}
+```
