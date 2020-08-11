@@ -165,6 +165,58 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+    char* argv[MAXARGS];
+    int state = UNDEF;
+    sigset_t set;
+    pid_t pid;
+
+    if(parseline(cmdline,argv) == 1){
+        state = BG;
+    }else{
+        state = FG;
+    }
+    if(argv[0] == NULL){return;}
+    if(!builtin_cmd(argv)){
+        if(sigemptyset(&set) < 0){
+            unix_error("sigemptyset error");
+        }
+        if(sigaddset(&set, SIGINT) < 0 || sigaddset(&set, SIGTSTP)<0 || sigaddset(&set,SIGCHLD) < 0){
+            unix_error("sigaddset error");
+        }
+        //prevent SIGCHILD blocking and concurrent error(competing) before fork
+        if(sigprocmask(SIG_BLOCK,&set,NULL)<0){
+            unix_error("sigprocmask error");
+        }
+        if((pid = fork()) < 0){
+            unix_error("fork error");
+        }else if(pid == 0){
+            /*
+            if tsh runs from bash, then tsh is a child process of bash, the child process of tsh is also member of foreground of bash.
+            That is, an input ctrl+c would send SIGINT to every child process of tsh. This is not correct, to prevent from this,
+            we can do something after fork but before execve: setpid(0,0) and guarantee that there is only one child process in bash:tsh.
+            */
+           if((sigprocmask(SIG_UNBLOCK,&set,NULL))<0){
+               unix_error("sigprocmask error");
+           }
+           if(setpgid(0,0)<0){
+               unix_error("setpid error");
+           }
+           if(execve(argv[0],argv,environ)<0){
+               printf("%s: command not found\n",argv[0]);
+               exit(0);
+           }
+        }
+
+        addjob(jobs,pid,state,cmdline);
+        if(sigprocmask(SIG_UNBLOCK,&set,NULL)){
+            unix_error("sigprocmask error");
+        }
+        if(state == FG){
+            waitfg(pid);
+        }else{
+            printf("[%d] (%d) %s",pid2jid(pid),pid,cmdline);
+        }
+    }
     return;
 }
 
@@ -231,7 +283,16 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
-    return 0;     /* not a builtin command */
+    if(!strcmp(argv[0], "quit")){
+        exit(0);
+    }else if(!strcmp(argv[0],"bg") || !strcmp(argv[0],"fg")){
+        do_bgfg(argv);
+    }else if(!strcmp(argv[0],"jobs")){
+        listjobs(jobs);
+    }else{
+        return 0;     /* not a builtin command */
+    }
+    return 1;
 }
 
 /* 
@@ -239,6 +300,50 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
+    int parsed;
+    struct job_t* job;
+    if(!argv[1]){
+        //bg/fg without args should be dropped.
+        printf("%s command requires PID or %%jobid argument\n", argv[0]);
+        return;
+    }
+
+    if(argv[1][0] == '%'){
+        if((parsed = strtol(&argv[1][1],NULL,10))<=0){
+            printf("%s: argument must be a PID or %%jobid\n",argv[0]);
+            return;
+        }
+        if((job = getjobjid(jobs,parsed)) == NULL){
+            printf("%%%d: No such job\n",parsed);
+            return;
+        }
+    }else{
+        if((parsed = strtol(argv[1],NULL,10))){
+            printf("%s: argument must be a PID or %%jobid",argv[0]);
+            return;
+        }
+        if((job = getjobpid(jobs,parsed)) == NULL){
+            printf("(%d): No such process\n", parsed);
+            return;
+        }
+    }
+
+    if(!strcmp(argv[0],"bg")){
+        job->state = BG;
+        if(kill(-job->pid,SIGCONT)<0){
+            unix_error("kill error");
+        }
+        printf("[%d] (%d) %s", job->jid, job->pid, job->cmdline);
+    }else if(!strcmp(argv[0],"fg")){
+        job->state = FG;
+        if(kill(-job->pid,SIGCONT)<0){
+            unix_error("kill error");
+        }
+        waitfg(job->pid);        
+    }else{
+        puts("do_bgfg: Internal error");
+        exit(0);
+    }
     return;
 }
 
@@ -247,6 +352,15 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
+    struct job_t* job = getjobpid(jobs,pid);
+    if(!job) return;
+
+    while(job->state == FG){
+        sleep(1);
+    }
+    if(verbose){
+        printf("waitfg: Process (%d) no longer the fg process\n", pid);
+    }
     return;
 }
 
@@ -263,6 +377,45 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
+    int status, jid;
+    pid_t pid;
+    struct job_t* job;
+    if(verbose){
+        puts("sigchld_handler: entering");
+    }
+    /*
+    WNOHANG: if child process is still runing, return 0
+    WUNTRACED: if child process stoped due to signal transmission, return rapidly.
+    */
+    while((pid = waitpid(-1,&status,WNOHANG|WUNTRACED))>0){
+        if((job = getjobpid(jobs,pid)) == NULL){
+            printf("Lost track of (%d)\n", pid);
+            return;
+        }
+        jid = job->jid;
+        if(WIFSTOPPED(status)){
+            printf("Job [%d] (%d) stopped by  signal %d\n",jid,job->pid,WSTOPSIG(status));
+            job->state = ST;
+        }
+        else if(WIFEXITED(status)){
+            if(deletejob(jobs,pid)){
+                if(verbose){
+                    printf("sigchld_handler: Job [%d] (%d) deleted\n", jid, pid);
+                    printf("sigchld_handler: Job [%d] (%d) terminates OK (status %d)\n", jid, pid, WEXITSTATUS(status));
+                }
+            }
+        }else{
+            if(deletejob(jobs,pid)){
+                if(verbose){
+                    printf("sigchld_handler: Job [%d] (%d) deleted\n", jid, pid);
+                }
+            }
+            printf("Job [%d] (%d) terminated by signal %d\n", jid, pid, WTERMSIG(status));
+        }
+    }
+    if(verbose){
+        puts("sigchld_handler: exiting");
+    }
     return;
 }
 
@@ -273,6 +426,22 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
+    if(verbose){
+        puts("sigint_handler: entering");
+    }
+    pid_t pid = fgpid(jobs);
+    if(pid){
+        if(kill(-pid,SIGINT)<0){
+            unix_error("kill (sigint) error");
+        }
+        if(verbose){
+            printf("sigint_handler: Job (%d) killed\n", pid);
+        }
+    }
+    if(verbose){
+        puts("sigint_handler: exiting");
+    }
+
     return;
 }
 
@@ -283,6 +452,22 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
+    if(verbose){
+        puts("sigstp_handler: entering");
+    }
+    pid_t pid = fgpid(jobs);
+    struct job_t* job = getjobpid(jobs, pid);
+    if(pid){
+        if(kill(-pid,SIGTSTP)<0){
+            unix_error("kill (sigtstp) error");
+        }
+        if(verbose){
+            printf("sigstp_handler: Job [%d] (%d) stopped\n", job->jid, pid);
+        }        
+    }
+    if(verbose){
+        puts("sigstp_handler: exiting");
+    }
     return;
 }
 
